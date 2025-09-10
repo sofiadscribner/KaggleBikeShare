@@ -38,7 +38,7 @@ train <- train |>
                               "Winter"  = "4"))
 
 
-# exploratory data analysis
+# EXPLORATORY DATA ANALYSIS
 
 glimpse(train)
 
@@ -91,3 +91,31 @@ type <- ggplot(df_props, aes(x = "Rentals", y = proportion, fill = Type)) +
   theme_minimal()
 
 (weather + time_series) / (correlations + type)
+
+# LINEAR REGRESSION
+
+train <- vroom('train.csv')
+test <- vroom('test.csv')
+
+train <- train |> select(1:9, 12)
+
+## Setup and Fit the Linear Regression Model
+my_linear_model <- linear_reg() %>% #Type of model
+  set_engine("lm") %>% # Engine = What R function to use
+  set_mode("regression") %>%
+  fit(formula=count~.-datetime, data=train)
+
+## Generate Predictions Using Linear Model
+bike_predictions <- predict(my_linear_model,
+                            new_data=test) # Use fit to predict
+bike_predictions ## Look at the output
+
+kaggle_submission <- bike_predictions %>%
+  bind_cols(., test) %>%
+  select(datetime, .pred) %>%
+  rename(count = .pred) %>%
+  mutate(count = pmax(0, count)) %>%
+  mutate(datetime = as.character(format(datetime)))
+
+vroom_write(x=kaggle_submission, file="./LinearPreds.csv", delim=",")
+
