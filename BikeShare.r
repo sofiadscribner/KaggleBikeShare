@@ -160,17 +160,200 @@ first_workflow <- workflow() %>%
 # make prediction
 
 lin_preds <- predict(first_workflow, new_data = test)
-lin_preds <- lin_preds %>% mutate(exp(.pred))
+lin_preds <- lin_preds %>% mutate(.pred = exp(.pred))
 
 
 # prepare for kaggle submission
 
-kaggle_submission_2 <- bike_predictions %>%
+kaggle_submission_2 <- lin_preds %>%
   bind_cols(., test) %>%
   select(datetime, .pred) %>%
   rename(count = .pred) %>%
   mutate(count = pmax(0, count)) %>%
   mutate(datetime = as.character(format(datetime)))
 
-vroom_write(x=kaggle_submission_2, file="./LinearPreds.csv", delim=",")
+vroom_write(x=kaggle_submission_2, file="./LinearPreds2.csv", delim=",")
+
+# PENALIZED REGRESSION - FIRST 5 ATTEMPTS
+
+# cleaning
+
+train <- vroom('train.csv')
+test <- vroom('test.csv')
+
+train <- train |> select(1:9, 12)
+train <- train |> mutate(count = log(count))
+
+
+# feature engineering
+
+preg_recipe <- recipe(count ~ ., data = train) %>%
+  step_mutate(weather = ifelse(weather == 4, 3, weather)) %>%
+  step_time(datetime, features = "hour") %>%
+  step_rm(datetime) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_corr(all_numeric_predictors(), threshold = 0.8)
+
+
+# workflow 1
+
+preg_model <- linear_reg(penalty = 0, mixture = 1) %>%
+  set_engine("glmnet") %>%
+  set_mode("regression")
+
+preg_workflow <- workflow() %>%
+  add_recipe(preg_recipe) %>%
+  add_model(preg_model) %>%
+  fit(data = train)
+
+# make prediction 1
+
+preg_0_1_preds <- predict(preg_workflow, new_data = test)
+preg_0_1_preds <- preg_0_1_preds %>% mutate(.pred = exp(.pred))
+
+
+# prepare for kaggle submission 1
+
+preg_sub_0_1 <- preg_0_1_preds %>%
+  bind_cols(., test) %>%
+  select(datetime, .pred) %>%
+  rename(count = .pred) %>%
+  mutate(count = pmax(0, count)) %>%
+  mutate(datetime = as.character(format(datetime)))
+
+vroom_write(
+  x = preg_sub_0_1,
+  file = "./PregPreds0_1.csv",
+  delim = ","
+)
+
+# workflow 2
+
+preg_model2 <- linear_reg(penalty = 0.001, mixture = 1) %>%
+  set_engine("glmnet") %>%
+  set_mode("regression")
+
+preg_workflow2 <- workflow() %>%
+  add_recipe(preg_recipe) %>%
+  add_model(preg_model2) %>%
+  fit(data = train)
+
+# make prediction 2
+
+preg_001_1_preds <- predict(preg_workflow2, new_data = test)
+preg_001_1_preds <- preg_001_1_preds %>% mutate(.pred = exp(.pred))
+
+
+# prepare for kaggle submission 2
+
+preg_sub_001_1 <- preg_001_1_preds %>%
+  bind_cols(., test) %>%
+  select(datetime, .pred) %>%
+  rename(count = .pred) %>%
+  mutate(count = pmax(0, count)) %>%
+  mutate(datetime = as.character(format(datetime)))
+
+vroom_write(
+  x = preg_sub_001_1,
+  file = "./PregPreds001_1.csv",
+  delim = ","
+)
+
+# workflow 3
+
+preg_model3 <- linear_reg(penalty = 0.1, mixture = 0) %>%
+  set_engine("glmnet") %>%
+  set_mode("regression")
+
+preg_workflow3 <- workflow() %>%
+  add_recipe(preg_recipe) %>%
+  add_model(preg_model3) %>%
+  fit(data = train)
+
+# make prediction 3
+
+preg_point1_0_preds <- predict(preg_workflow3, new_data = test)
+preg_point1_0_preds <- preg_point1_0_preds %>% mutate(.pred = exp(.pred))
+
+
+# prepare for kaggle submission 3
+
+preg_sub_point1_0 <- preg_point1_0_preds %>%
+  bind_cols(., test) %>%
+  select(datetime, .pred) %>%
+  rename(count = .pred) %>%
+  mutate(count = pmax(0, count)) %>%
+  mutate(datetime = as.character(format(datetime)))
+
+vroom_write(
+  x = preg_sub_point1_0,
+  file = "./PregPredspoint1_0.csv",
+  delim = ","
+)
+
+
+# workflow 4
+
+preg_model4 <- linear_reg(penalty = 5, mixture = .5) %>%
+  set_engine("glmnet") %>%
+  set_mode("regression")
+
+preg_workflow4 <- workflow() %>%
+  add_recipe(preg_recipe) %>%
+  add_model(preg_model4) %>%
+  fit(data = train)
+
+# make prediction 4
+
+preg_5_point5_preds <- predict(preg_workflow4, new_data = test)
+preg_5_point5_preds <- preg_5_point5_preds %>% mutate(.pred = exp(.pred))
+
+
+# prepare for kaggle submission 4
+
+preg_sub_5_point5 <- preg_5_point5_preds %>%
+  bind_cols(., test) %>%
+  select(datetime, .pred) %>%
+  rename(count = .pred) %>%
+  mutate(count = pmax(0, count)) %>%
+  mutate(datetime = as.character(format(datetime)))
+
+vroom_write(
+  x = preg_sub_5_point5,
+  file = "./PregPreds5_point5.csv",
+  delim = ","
+)
+
+# workflow 5
+
+preg_model5 <- linear_reg(penalty = 1, mixture = .2) %>%
+  set_engine("glmnet") %>%
+  set_mode("regression")
+
+preg_workflow5 <- workflow() %>%
+  add_recipe(preg_recipe) %>%
+  add_model(preg_model5) %>%
+  fit(data = train)
+
+# make prediction 5
+
+preg_1_point2_preds <- predict(preg_workflow5, new_data = test)
+preg_1_point2_preds <- preg_1_point2_preds %>% mutate(.pred = exp(.pred))
+
+
+# prepare for kaggle submission 5
+
+preg_sub_1_point2 <- preg_1_point2_preds %>%
+  bind_cols(., test) %>%
+  select(datetime, .pred) %>%
+  rename(count = .pred) %>%
+  mutate(count = pmax(0, count)) %>%
+  mutate(datetime = as.character(format(datetime)))
+
+vroom_write(
+  x = preg_sub_1_point2,
+  file = "./PregPreds1_point2.csv",
+  delim = ","
+)
 
