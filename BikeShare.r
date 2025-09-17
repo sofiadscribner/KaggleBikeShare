@@ -357,3 +357,92 @@ vroom_write(
   delim = ","
 )
 
+# PENALIZED REGRESSION PARAMETER TUNING
+
+# cleaning
+
+train <- vroom('train.csv')
+test <- vroom('test.csv')
+
+train <- train |> select(1:9, 12)
+train <- train |> mutate(count = log(count))
+
+
+# feature engineering
+
+preg_recipe <- recipe(count ~ ., data = train) %>%
+  step_mutate(weather = ifelse(weather == 4, 3, weather)) %>%
+  step_time(datetime, features = "hour") %>%
+  step_rm(datetime) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_corr(all_numeric_predictors(), threshold = 0.8)
+
+# model
+
+tuned_preg_model <- linear_reg(penalty = tune(),
+                               mixture = tune()) %>%
+  set_engine("glmnet")
+
+# workflow
+
+tuned_preg_wf <- workflow() %>%
+  add_recipe(preg_recipe) %>%
+  add_model(tuned_preg_model)
+
+# tuning grid
+
+tuning_grid <- grid_regular(penalty(),
+                            mixture(),
+                            levels = 10)
+
+# split for CV
+
+folds <- vfold_cv(train, v = 5, repeats = 1)
+
+# run the cv
+
+cv_results <- tuned_preg_wf %>%
+  tune_grid(resamples = folds,
+            grid = tuning_grid,
+            metrics = metric_set(rmse))
+
+# plot results
+
+collect_metrics(cv_results) %>%
+  ggplot(data = ., aes(x=penalty, y = mean, color = factor(mixture))) +
+  geom_line()
+
+# find best parameters
+
+best_tune <- cv_results %>%
+  select_best(metric = "rmse")
+
+# finalize and fit wf
+
+final_wf <-
+  tuned_preg_wf %>%
+  finalize_workflow(best_tune) %>%
+  fit(data= train)
+
+# predict
+
+tuned_preds <- final_wf %>%
+  predict(new_data =  test)
+tuned_preds <- tuned_preds %>% mutate(.pred = exp(.pred))
+
+
+# prepare for tuned kaggle submission
+
+tuned_preds_sub <- tuned_preds %>%
+  bind_cols(., test) %>%
+  select(datetime, .pred) %>%
+  rename(count = .pred) %>%
+  mutate(count = pmax(0, count)) %>%
+  mutate(datetime = as.character(format(datetime)))
+
+vroom_write(
+  x = tuned_preds_sub,
+  file = "./PregPreds.csv",
+  delim = ","
+)
