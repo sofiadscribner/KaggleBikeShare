@@ -446,3 +446,75 @@ vroom_write(
   file = "./PregPreds.csv",
   delim = ","
 )
+
+# DECISION TREE
+
+train <- vroom('train.csv')
+test <- vroom('test.csv')
+
+train <- train |> select(1:9, 12)
+train <- train |> mutate(count = log(count))
+
+# feature engineering
+tree_recipe <- recipe(count ~ ., data = train) %>%
+  step_mutate(weather = ifelse(weather == 4, 3, weather)) %>%
+  step_time(datetime, features = "hour") %>%
+  step_rm(datetime) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_corr(all_numeric_predictors(), threshold = 0.8)
+
+# model
+tree_model <- decision_tree(tree_depth = tune(),
+                            cost_complexity = tune(),
+                            min_n = tune()) %>%
+  set_engine("rpart") %>%
+  set_mode("regression")
+
+# workflow
+tree_wf <- workflow() %>%
+  add_recipe(tree_recipe) %>%
+  add_model(tree_model)
+
+# tuning grid
+tree_grid <- grid_regular(tree_depth(),
+                          cost_complexity(),
+                          min_n(),
+                          levels = 5)
+
+# split for CV
+folds <- vfold_cv(train, v = 5, repeats = 1)
+
+# run the cv
+tree_cv_results <- tree_wf %>%
+  tune_grid(resamples = folds,
+            grid = tree_grid,
+            metrics = metric_set(rmse))
+
+# find best parameters
+best_tree_tune <- tree_cv_results %>%
+  select_best(metric = "rmse")
+
+# finalize and fit workflow
+final_tree_wf <- tree_wf %>%
+  finalize_workflow(best_tree_tune) %>%
+  fit(data = train)
+
+# predict
+tuned_tree_preds <- final_tree_wf %>%
+  predict(new_data = test) %>%
+  mutate(.pred = exp(.pred))
+
+# prepare for kaggle submission
+tree_preds_sub <- tuned_tree_preds %>%
+  bind_cols(test) %>%
+  select(datetime, .pred) %>%
+  rename(count = .pred) %>%
+  mutate(count = pmax(0, count)) %>%
+  mutate(datetime = as.character(format(datetime)))
+
+vroom_write(
+  x = tree_preds_sub,
+  file = "./DecisionTreePreds.csv",
+  delim = ","
+)
