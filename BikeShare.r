@@ -5,6 +5,8 @@ library(tidymodels)
 library(vroom)
 library(forcats)
 library(patchwork)
+library(bonsai)
+library(lightgbm)
 
 # read in data
 
@@ -551,8 +553,8 @@ forest_wf <- workflow() %>%
 
 # tuning grid
 forest_grid <- grid_regular(mtry(range = c(1,8)),
-                          min_n(),
-                          levels = 5)
+                            min_n(),
+                            levels = 5)
 
 # split for CV
 folds <- vfold_cv(train, v = 5, repeats = 1)
@@ -590,3 +592,72 @@ vroom_write(
   file = "./RandomForestPreds.csv",
   delim = ","
 )
+
+# BOOSTED MODEL (BART)
+
+train <- vroom('train.csv')
+test <- vroom('test.csv')
+
+train <- train |> select(1:9, 12)
+train <- train |> mutate(count = log(count))
+
+# feature engineering
+bart_recipe <- recipe(count ~ ., data = train) %>%
+  step_mutate(weather = ifelse(weather == 4, 3, weather)) %>%
+  step_time(datetime, features = "hour") %>%
+  step_rm(datetime) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_corr(all_numeric_predictors(), threshold = 0.8)
+
+# model
+bart_model <- bart(trees = tune()) %>%
+  set_engine("dbarts") %>%
+  set_mode("regression")
+
+# workflow
+bart_wf <- workflow() %>%
+  add_recipe(bart_recipe) %>%
+  add_model(bart_model)
+
+# tuning grid
+bart_grid <- grid_regular(trees(),
+                          levels = 10)
+
+# split for CV
+folds <- vfold_cv(train, v = 5, repeats = 1)
+
+# run the cv
+bart_cv_results <- bart_wf %>%
+  tune_grid(resamples = folds,
+            grid = bart_grid,
+            metrics = metric_set(rmse))
+
+# find best parameters
+best_bart_tune <- bart_cv_results %>%
+  select_best(metric = "rmse")
+
+# finalize and fit workflow
+final_bart_wf <- bart_wf %>%
+  finalize_workflow(best_bart_tune) %>%
+  fit(data = train)
+
+# predict
+tuned_bart_preds <- final_bart_wf %>%
+  predict(new_data = test) %>%
+  mutate(.pred = exp(.pred))
+
+# prepare for kaggle submission
+bart_preds_sub <- tuned_bart_preds %>%
+  bind_cols(test) %>%
+  select(datetime, .pred) %>%
+  rename(count = .pred) %>%
+  mutate(count = pmax(0, count)) %>%
+  mutate(datetime = as.character(format(datetime)))
+
+vroom_write(
+  x = bart_preds_sub,
+  file = "./BARTPreds.csv",
+  delim = ","
+)
+
