@@ -7,6 +7,8 @@ library(forcats)
 library(patchwork)
 library(bonsai)
 library(lightgbm)
+library(agua)
+
 
 # read in data
 
@@ -622,7 +624,7 @@ bart_wf <- workflow() %>%
 
 # tuning grid
 bart_grid <- grid_regular(trees(),
-                          levels = 10)
+                          levels = 5)
 
 # split for CV
 folds <- vfold_cv(train, v = 5, repeats = 1)
@@ -660,4 +662,53 @@ vroom_write(
   file = "./BARTPreds.csv",
   delim = ","
 )
+
+# STACKED MODEL
+
+h2o::h2o.init()
+
+train <- vroom('train.csv')
+test <- vroom('test.csv')
+
+train <- train |> select(1:9, 12)
+train <- train |> mutate(count = log(count))
+
+# feature engineering
+stacked_recipe <- recipe(count ~ ., data = train) %>%
+  step_mutate(weather = ifelse(weather == 4, 3, weather)) %>%
+  step_time(datetime, features = "hour") %>%
+  step_rm(datetime) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_corr(all_numeric_predictors(), threshold = 0.8)
+
+
+stacked_model <- auto_ml() %>%
+  set_engine("h2o", max_runtime_secs = 300) %>%
+  set_mode("regression")
+
+
+
+stacked_model_wf <- workflow() %>%
+  add_recipe(stacked_recipe) %>%
+  add_model(stacked_model) %>%
+  fit(data = train)
+
+preds <- predict(stacked_model_wf, new_data = test)
+
+# prepare for kaggle submission
+h2o_preds_sub <- preds %>%
+  bind_cols(test) %>%
+  select(datetime, .pred) %>%
+  rename(count = .pred) %>%
+  mutate(count = pmax(0, count)) %>%
+  mutate(datetime = as.character(format(datetime)))
+
+vroom_write(
+  x = h2o_preds_sub,
+  file = "./h2oPreds.csv",
+  delim = ","
+)
+      
+      
 
