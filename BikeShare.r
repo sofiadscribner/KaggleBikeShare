@@ -711,4 +711,48 @@ vroom_write(
 )
       
       
+## DataRobot Dataset
 
+train <- vroom('train.csv')
+test <- vroom('test.csv')
+
+train <- train |> select(1:9, 12)
+train <- train |> mutate(count = log(count))
+
+# define recipe
+robot_recipe <- recipe(count ~ ., data = train) %>%
+  step_mutate(weather = ifelse(weather == 4, 3, weather)) %>%
+  step_time(datetime, features = "hour") %>%
+  step_rm(datetime) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_corr(all_numeric_predictors(), threshold = 0.8)
+
+# prep the recipe on the training data
+robot_prep <- prep(robot_recipe, training = train)
+
+# bake the recipe on TRAINING data
+baked_train <- bake(robot_prep, new_data = train)
+
+# bake the recipe on TEST data
+baked_test <- bake(robot_prep, new_data = test)
+
+readr::write_csv(baked_train, "baked_train.csv")
+readr::write_csv(baked_test, "baked_test.csv")
+
+robot_preds <- vroom('datarobotpreds.csv') %>%
+  mutate(count_PREDICTION = exp(count_PREDICTION))
+
+# prepare for kaggle submission
+robot_preds_sub <- robot_preds %>%
+  bind_cols(test) %>%
+  select(datetime, count_PREDICTION) %>%
+  rename(count = count_PREDICTION) %>%
+  mutate(count = pmax(0, count)) %>%
+  mutate(datetime = as.character(format(datetime)))
+
+vroom_write(
+  x = robot_preds_sub,
+  file = "./RobotPreds.csv",
+  delim = ","
+)
