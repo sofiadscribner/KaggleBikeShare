@@ -687,17 +687,17 @@ stacked_model <- auto_ml() %>%
   set_engine("h2o", max_runtime_secs = 300) %>%
   set_mode("regression")
 
-
-
 stacked_model_wf <- workflow() %>%
   add_recipe(stacked_recipe) %>%
   add_model(stacked_model) %>%
   fit(data = train)
 
-preds <- predict(stacked_model_wf, new_data = test)
+h2o_preds <- stacked_model_wf %>%
+  predict(new_data = test) %>%
+  mutate(.pred = exp(.pred))
 
 # prepare for kaggle submission
-h2o_preds_sub <- preds %>%
+h2o_preds_sub <- h2o_preds %>%
   bind_cols(test) %>%
   select(datetime, .pred) %>%
   rename(count = .pred) %>%
