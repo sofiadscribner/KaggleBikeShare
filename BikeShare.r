@@ -717,7 +717,7 @@ train <- vroom('train.csv')
 test <- vroom('test.csv')
 
 train <- train |> select(1:9, 12)
-train <- train |> mutate(count = log(count))
+train <- train |> mutate(count = log1p(count))
 
 # define recipe
 robot_recipe <- recipe(count ~ ., data = train) %>%
@@ -754,5 +754,56 @@ robot_preds_sub <- robot_preds %>%
 vroom_write(
   x = robot_preds_sub,
   file = "./RobotPreds.csv",
+  delim = ","
+)
+
+
+# FINAL MODEL
+
+h2o::h2o.init()
+
+train <- vroom('train.csv')
+test <- vroom('test.csv')
+
+train <- train |> select(1:9, 12)
+train <- train |> mutate(count = log1p(count))
+
+# feature engineering
+h2o_recipe <- recipe(count ~ ., data = train) %>%
+  step_mutate(weather = ifelse(weather == 4, 3, weather),
+              weekend = ifelse(wday(datetime) %in% c(1,7), 1, 0),
+              rush_hour = ifelse(hour(datetime) %in% c(7:9, 16:19), 1, 0)) %>%
+  step_date(datetime, features = c("month", "year", "dow")) %>%
+  step_time(datetime, features = "hour") %>%
+  step_rm(datetime) %>%
+  step_interact(terms = ~ temp:humidity + temp:windspeed + season:humidity) %>%
+  step_poly(temp, humidity, degree = 2) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_normalize(all_numeric_predictors())
+
+h2o_model <- auto_ml() %>%
+  set_engine("h2o", max_runtime_secs = 180, max_models = 6) %>%
+  set_mode("regression")
+
+h2o_model_wf <- workflow() %>%
+  add_recipe(h2o_recipe) %>%
+  add_model(h2o_model) %>%
+  fit(data = train)
+
+final_preds <- h2o_model_wf %>%
+  predict(new_data = test) %>%
+  mutate(.pred = expm1(.pred))
+
+# prepare for kaggle submission
+h2o_preds_sub <- final_preds %>%
+  bind_cols(test) %>%
+  select(datetime, .pred) %>%
+  rename(count = .pred) %>%
+  mutate(count = pmax(0, count)) %>%
+  mutate(datetime = as.character(format(datetime)))
+
+vroom_write(
+  x = h2o_preds_sub,
+  file = "./BestPreds.csv",
   delim = ","
 )
